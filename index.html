@@ -344,11 +344,23 @@
                 this.errors = [];
                 
                 try {
+                    console.log('Loading crypto news from CryptoCompare API...');
+                    
+                    // Try CryptoCompare API first (works on all devices)
+                    const apiArticles = await this.fetchCryptoCompareNews();
+                    
+                    if (apiArticles.length > 0) {
+                        this.allNews = apiArticles;
+                        this.lastUpdate = new Date();
+                        console.log(`✅ Loaded ${this.allNews.length} articles from CryptoCompare API`);
+                        this.isLoading = false;
+                        return;
+                    }
+                    
+                    // Fallback to RSS feeds if API fails
+                    console.log('API failed, trying RSS feeds...');
                     const allArticles = [];
                     let successCount = 0;
-                    
-                    // Always try to load real news first, regardless of device
-                    console.log('Loading real RSS feeds...');
                     
                     const fetchPromises = this.newsFeeds.map(feed => this.fetchFeedNews(feed));
                     const results = await Promise.allSettled(fetchPromises);
@@ -362,32 +374,120 @@
                         }
                     });
                     
-                    console.log(`✅ Successfully loaded from ${successCount}/${this.newsFeeds.length} sources`);
-                    
-                    // Only use fallback if we have NO real articles at all
-                    if (allArticles.length === 0) {
-                        console.log('No real articles loaded - using fallback content');
-                        allArticles.push(...this.generateFallbackNews());
+                    if (allArticles.length > 0) {
+                        this.allNews = this.removeDuplicates(allArticles)
+                            .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
+                            .slice(0, 100);
+                        console.log(`✅ Loaded ${this.allNews.length} articles from RSS feeds`);
+                    } else {
+                        console.log('All sources failed, using fallback content');
+                        this.allNews = this.generateFallbackNews();
                     }
-                    
-                    // Sort by date (newest first) and remove duplicates
-                    this.allNews = this.removeDuplicates(allArticles)
-                        .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
-                        .slice(0, 100);
                     
                     this.lastUpdate = new Date();
                     
-                    console.log(`✅ Total articles loaded: ${this.allNews.length}`);
-                    
                 } catch (error) {
+                    console.error('News loading error:', error);
                     this.errors.push(`General error: ${error.message}`);
-                    // Only use fallback as last resort
-                    if (this.allNews.length === 0) {
-                        this.allNews = this.generateFallbackNews();
-                    }
+                    this.allNews = this.generateFallbackNews();
                 }
                 
                 this.isLoading = false;
+            }
+            
+            async fetchCryptoCompareNews() {
+                try {
+                    // CryptoCompare News API - free tier, no API key needed for basic usage
+                    const apiUrl = 'https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=latest';
+                    
+                    const response = await fetch(apiUrl, {
+                        headers: {
+                            'Accept': 'application/json',
+                            'User-Agent': 'CryptoNewsApp/1.0'
+                        },
+                        timeout: 10000
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`CryptoCompare API error: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (!data || !data.Data || !Array.isArray(data.Data)) {
+                        throw new Error('Invalid API response format');
+                    }
+                    
+                    const articles = [];
+                    
+                    data.Data.forEach((item, index) => {
+                        try {
+                            if (index < 50) { // Limit to 50 articles
+                                const publishDate = new Date(item.published_on * 1000); // Convert Unix timestamp
+                                const timeAgo = this.getTimeAgo(publishDate);
+                                
+                                // Determine category based on tags and content
+                                const category = this.categorizeAPIArticle(item.title, item.body, item.tags);
+                                const importance = this.calculateAPIImportance(item.title, item.body);
+                                
+                                articles.push({
+                                    id: item.id || Date.now() + Math.random(),
+                                    title: item.title || 'Crypto News Update',
+                                    link: item.url || item.guid || '#',
+                                    excerpt: this.cleanText(item.body || '').substring(0, 200) + '...',
+                                    source: item.source_info?.name || item.source || 'CryptoCompare',
+                                    publishDate: publishDate,
+                                    timeAgo: timeAgo,
+                                    category: category,
+                                    importance: importance,
+                                    isNew: (Date.now() - publishDate.getTime()) < 3600000 // New if less than 1 hour
+                                });
+                            }
+                        } catch (parseError) {
+                            console.warn('Error parsing API article:', parseError);
+                        }
+                    });
+                    
+                    console.log(`✅ CryptoCompare API: ${articles.length} articles loaded`);
+                    return articles.sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate));
+                    
+                } catch (error) {
+                    console.error('CryptoCompare API failed:', error);
+                    throw error;
+                }
+            }
+            
+            categorizeAPIArticle(title, body, tags) {
+                const text = (title + ' ' + body + ' ' + (tags || '')).toLowerCase();
+                
+                // Government/Regulation keywords
+                if (text.match(/\b(sec|cftc|regulation|government|congress|senate|bill|law|legal|court|fed|federal reserve|treasury|policy|regulatory|compliance|license)\b/)) {
+                    return 'government';
+                }
+                
+                // Institutional keywords  
+                if (text.match(/\b(jpmorgan|goldman|morgan stanley|bank of america|wells fargo|deutsche bank|ubs|hsbc|institutional|wall street|fidelity|blackrock|grayscale|vanguard|state street|coinbase|kraken|binance|etf|fund|custody|trading desk|investment)\b/)) {
+                    return 'institutions';
+                }
+                
+                // Default to coins for crypto-specific content
+                return 'coins';
+            }
+            
+            calculateAPIImportance(title, body) {
+                const text = (title + ' ' + body).toLowerCase();
+                
+                // High importance indicators
+                if (text.match(/\b(breaking|urgent|major|significant|approved|banned|launches?|hack|crash|surge|soar|plummet|all-time high|ath|record|milestone|regulation|partnership|acquisition|merger)\b/)) {
+                    return 'high';
+                }
+                
+                // Medium importance indicators
+                if (text.match(/\b(announces?|partnership|upgrade|update|investment|funding|expansion|integration|adopts?|reveals?|plans?)\b/)) {
+                    return 'medium';
+                }
+                
+                return 'low';
             }
             
             async fetchFeedNews(feed) {
@@ -748,7 +848,7 @@
                                         LIVE
                                     </div>
                                 </div>
-                                <div class="subtitle">Latest cryptocurrency news • Auto-updating every 5min</div>
+                                <div class="subtitle">Latest cryptocurrency news • CryptoCompare API • Auto-updating every 5min</div>
                                 <div style="font-size: 10px; color: #6b7280; font-family: monospace;">Last updated: ${this.lastUpdate.toLocaleTimeString()}</div>
                             </div>
                             <div style="display: flex; align-items: center;">
