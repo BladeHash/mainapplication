@@ -3,9 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
     <title>Crypto News - Live Updates</title>
     
     <!-- PWA Meta Tags -->
@@ -219,18 +216,39 @@
             flex-wrap: wrap;
             padding-bottom: 8px;
         }
+        
+        .error-message {
+            background: #7f1d1d;
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 12px 0;
+            font-size: 14px;
+        }
+        
+        .retry-btn {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: 8px;
+        }
     </style>
 </head>
 <body>
     <div id="app">
         <div class="loading">
             <div class="spinner"></div>
-            <div>Loading Crypto News...</div>
+            <div>Loading Live Crypto News...</div>
         </div>
     </div>
 
     <script>
-        class SimpleCryptoNewsApp {
+        class LiveCryptoNewsApp {
             constructor() {
                 this.selectedCategory = 'all';
                 this.displayedArticles = 20;
@@ -239,13 +257,65 @@
                 this.allNews = [];
                 this.lastUpdate = new Date();
                 this.updateInterval = null;
+                this.isLoading = false;
+                this.errors = [];
                 
                 this.categories = [
                     { id: 'all', label: 'All News', icon: '📰' },
-                    { id: 'priority', label: 'Priority', icon: ⚠️' },
+                    { id: 'priority', label: 'Priority', icon: '⚠️' },
                     { id: 'government', label: 'Government', icon: '🏛️' },
                     { id: 'institutions', label: 'Institutions', icon: '📈' },
                     { id: 'coins', label: 'Top 100 Coins', icon: '🪙' }
+                ];
+                
+                // RSS Feed sources
+                this.newsFeeds = [
+                    {
+                        name: 'CoinDesk',
+                        url: 'https://www.coindesk.com/arc/outboundfeeds/rss/',
+                        category: 'general'
+                    },
+                    {
+                        name: 'CoinTelegraph',
+                        url: 'https://cointelegraph.com/rss',
+                        category: 'general'
+                    },
+                    {
+                        name: 'The Block',
+                        url: 'https://www.theblock.co/rss.xml',
+                        category: 'general'
+                    },
+                    {
+                        name: 'Bitcoin.com',
+                        url: 'https://news.bitcoin.com/feed/',
+                        category: 'coins'
+                    },
+                    {
+                        name: 'Crypto Briefing',
+                        url: 'https://cryptobriefing.com/feed/',
+                        category: 'general'
+                    },
+                    {
+                        name: 'BeInCrypto',
+                        url: 'https://beincrypto.com/feed/',
+                        category: 'general'
+                    },
+                    {
+                        name: 'Coinpedia',
+                        url: 'https://coinpedia.org/feed/',
+                        category: 'general'
+                    },
+                    {
+                        name: 'CryptoPotato',
+                        url: 'https://cryptopotato.com/feed/',
+                        category: 'general'
+                    }
+                ];
+                
+                // Backup proxy services
+                this.proxyServices = [
+                    'https://api.allorigins.win/get?url=',
+                    'https://corsproxy.io/?'
                 ];
                 
                 this.init();
@@ -253,13 +323,14 @@
             
             async init() {
                 this.setupPWA();
-                await this.loadNews();
+                await this.loadInitialNews();
                 this.render();
                 this.attachEventListeners();
                 this.startAutoUpdate();
             }
             
             setupPWA() {
+                // PWA install prompt
                 window.addEventListener('beforeinstallprompt', (e) => {
                     e.preventDefault();
                     this.deferredPrompt = e;
@@ -268,28 +339,18 @@
                 });
             }
             
-            async loadNews() {
-                console.log('Loading news...');
+            async loadInitialNews() {
+                this.isLoading = true;
+                this.errors = [];
                 
-                // Try to load real RSS feeds first
                 try {
                     const allArticles = [];
                     let successCount = 0;
                     
-                    // RSS Feed sources (same as working desktop version)
-                    const newsFeeds = [
-                        { name: 'CoinDesk', url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', category: 'general' },
-                        { name: 'CoinTelegraph', url: 'https://cointelegraph.com/rss', category: 'general' },
-                        { name: 'The Block', url: 'https://www.theblock.co/rss.xml', category: 'general' },
-                        { name: 'Bitcoin.com', url: 'https://news.bitcoin.com/feed/', category: 'coins' },
-                        { name: 'Crypto Briefing', url: 'https://cryptobriefing.com/feed/', category: 'general' },
-                        { name: 'BeInCrypto', url: 'https://beincrypto.com/feed/', category: 'general' },
-                        { name: 'Coinpedia', url: 'https://coinpedia.org/feed/', category: 'general' },
-                        { name: 'CryptoPotato', url: 'https://cryptopotato.com/feed/', category: 'general' }
-                    ];
+                    // Always try to load real news first, regardless of device
+                    console.log('Loading real RSS feeds...');
                     
-                    // Try to fetch RSS feeds
-                    const fetchPromises = newsFeeds.map(feed => this.fetchFeedNews(feed));
+                    const fetchPromises = this.newsFeeds.map(feed => this.fetchFeedNews(feed));
                     const results = await Promise.allSettled(fetchPromises);
                     
                     results.forEach((result, index) => {
@@ -297,45 +358,53 @@
                             allArticles.push(...result.value);
                             successCount++;
                         } else {
-                            console.log(`❌ ${newsFeeds[index].name}: ${result.reason}`);
+                            this.errors.push(`${this.newsFeeds[index].name}: ${result.reason}`);
                         }
                     });
                     
-                    console.log(`✅ Successfully loaded from ${successCount}/${newsFeeds.length} sources`);
+                    console.log(`✅ Successfully loaded from ${successCount}/${this.newsFeeds.length} sources`);
                     
-                    if (allArticles.length > 10) {
-                        // Use real RSS articles if we got enough
-                        this.allNews = this.removeDuplicates(allArticles)
-                            .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
-                            .slice(0, 100);
-                        
-                        console.log(`✅ Using ${this.allNews.length} real RSS articles`);
-                        this.lastUpdate = new Date();
-                        return;
+                    // Only use fallback if we have NO real articles at all
+                    if (allArticles.length === 0) {
+                        console.log('No real articles loaded - using fallback content');
+                        allArticles.push(...this.generateFallbackNews());
                     }
+                    
+                    // Sort by date (newest first) and remove duplicates
+                    this.allNews = this.removeDuplicates(allArticles)
+                        .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
+                        .slice(0, 100);
+                    
+                    this.lastUpdate = new Date();
+                    
+                    console.log(`✅ Total articles loaded: ${this.allNews.length}`);
+                    
                 } catch (error) {
-                    console.log('RSS loading failed:', error);
+                    this.errors.push(`General error: ${error.message}`);
+                    // Only use fallback as last resort
+                    if (this.allNews.length === 0) {
+                        this.allNews = this.generateFallbackNews();
+                    }
                 }
                 
-                // Fallback to generated content only if RSS completely fails
-                console.log('Using fallback content due to RSS failure');
-                this.allNews = this.generateCurrentCryptoNews();
-                this.lastUpdate = new Date();
+                this.isLoading = false;
             }
             
             async fetchFeedNews(feed) {
-                const proxyServices = [
-                    'https://api.allorigins.win/get?url=',
-                    'https://corsproxy.io/?'
-                ];
-                
-                for (let proxyIndex = 0; proxyIndex < proxyServices.length; proxyIndex++) {
+                // Try multiple proxy services if one fails
+                for (let proxyIndex = 0; proxyIndex < this.proxyServices.length; proxyIndex++) {
                     try {
-                        const proxy = proxyServices[proxyIndex];
-                        const proxyUrl = `${proxy}${encodeURIComponent(feed.url)}`;
+                        const proxy = this.proxyServices[proxyIndex];
+                        let proxyUrl;
+                        
+                        if (proxy.includes('allorigins')) {
+                            proxyUrl = `${proxy}${encodeURIComponent(feed.url)}`;
+                        } else {
+                            proxyUrl = `${proxy}${encodeURIComponent(feed.url)}`;
+                        }
                         
                         const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 15000);
+                        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
                         
                         const response = await fetch(proxyUrl, {
                             signal: controller.signal,
@@ -356,12 +425,14 @@
                         
                         if (contentType && contentType.includes('application/json')) {
                             data = await response.json();
+                            // AllOrigins format
                             if (data.contents) {
                                 data = data.contents;
                             } else {
                                 throw new Error('No contents in JSON response');
                             }
                         } else {
+                            // Direct RSS/XML
                             data = await response.text();
                         }
                         
@@ -369,15 +440,22 @@
                             throw new Error('Response too short');
                         }
                         
+                        // Check if content looks like an error page
+                        if (data.includes('403') || data.includes('Forbidden') || data.includes('Access Denied')) {
+                            throw new Error('Access forbidden');
+                        }
+                        
                         // Parse RSS/XML
                         const parser = new DOMParser();
                         const xmlDoc = parser.parseFromString(data, 'text/xml');
                         
+                        // Check for XML parsing errors
                         const parseError = xmlDoc.querySelector('parsererror');
                         if (parseError) {
                             throw new Error('Invalid RSS/XML');
                         }
                         
+                        // Handle both RSS and Atom feeds
                         const items = xmlDoc.querySelectorAll('item, entry');
                         
                         if (items.length === 0) {
@@ -387,14 +465,14 @@
                         const articles = [];
                         
                         items.forEach((item, index) => {
-                            if (index < 12) {
+                            if (index < 12) { // Limit per source
                                 try {
                                     const article = this.parseRSSItem(item, feed);
                                     if (article && article.title && article.link) {
                                         articles.push(article);
                                     }
                                 } catch (parseError) {
-                                    // Skip bad articles silently
+                                    // Silently skip bad articles
                                 }
                             }
                         });
@@ -407,9 +485,11 @@
                         return articles;
                         
                     } catch (error) {
-                        if (proxyIndex === proxyServices.length - 1) {
+                        // If this is the last proxy, throw the error
+                        if (proxyIndex === this.proxyServices.length - 1) {
                             throw new Error(error.message);
                         }
+                        // Otherwise, try next proxy
                         continue;
                     }
                 }
@@ -425,9 +505,11 @@
                     if (!title || title.length < 10) return null;
                     if (!link || !link.startsWith('http')) return null;
                     
+                    // Calculate time ago
                     let publishDate;
                     try {
                         publishDate = pubDate ? new Date(pubDate) : new Date();
+                        // If date is invalid or in the future, use current time
                         if (isNaN(publishDate.getTime()) || publishDate > new Date()) {
                             publishDate = new Date();
                         }
@@ -436,9 +518,12 @@
                     }
                     
                     const timeAgo = this.getTimeAgo(publishDate);
+                    
+                    // Auto-categorize based on keywords
                     const category = this.categorizeArticle(title, description);
                     const importance = this.calculateImportance(title, description);
                     
+                    // Create excerpt
                     let excerpt = this.cleanText(description);
                     if (excerpt.length > 200) {
                         excerpt = excerpt.substring(0, 200) + '...';
@@ -456,10 +541,11 @@
                         timeAgo: timeAgo,
                         category: category,
                         importance: importance,
-                        isNew: (Date.now() - publishDate.getTime()) < 3600000
+                        isNew: (Date.now() - publishDate.getTime()) < 3600000 // New if less than 1 hour old
                     };
                     
                 } catch (error) {
+                    console.warn('Error parsing RSS item:', error);
                     return null;
                 }
             }
@@ -469,6 +555,7 @@
                 for (const selector of selectorList) {
                     const element = item.querySelector(selector);
                     if (element) {
+                        // Handle different content types
                         if (element.textContent) {
                             return element.textContent.trim();
                         } else if (element.getAttribute('href')) {
@@ -489,10 +576,10 @@
             cleanText(text) {
                 if (!text) return '';
                 return text
-                    .replace(/<[^>]*>/g, '')
-                    .replace(/&[^;]+;/g, '')
-                    .replace(/\s+/g, ' ')
-                    .replace(/\[.*?\]/g, '')
+                    .replace(/<[^>]*>/g, '') // Remove HTML tags
+                    .replace(/&[^;]+;/g, '') // Remove HTML entities
+                    .replace(/\s+/g, ' ') // Normalize whitespace
+                    .replace(/\[.*?\]/g, '') // Remove bracketed text like [...]
                     .trim();
             }
             
@@ -517,10 +604,12 @@
             calculateImportance(title, description) {
                 const text = (title + ' ' + description).toLowerCase();
                 
+                // High importance keywords
                 if (text.match(/\b(breaking|urgent|major|significant|approved|banned|launch|hack|crash|surge|all-time high|ath|regulation|sec)\b/)) {
                     return 'high';
                 }
                 
+                // Medium importance keywords
                 if (text.match(/\b(announces|partnership|upgrade|update|investment|funding|acquisition|expands)\b/)) {
                     return 'medium';
                 }
@@ -533,247 +622,9 @@
                 for (let i = 0; i < str.length; i++) {
                     const char = str.charCodeAt(i);
                     hash = ((hash << 5) - hash) + char;
-                    hash = hash & hash;
+                    hash = hash & hash; // Convert to 32-bit integer
                 }
                 return Math.abs(hash);
-            }
-            
-            removeDuplicates(articles) {
-                const seen = new Set();
-                return articles.filter(article => {
-                    const key = article.title.toLowerCase().substring(0, 50);
-                    if (seen.has(key)) {
-                        return false;
-                    }
-                    seen.add(key);
-                    return true;
-                });
-            }
-            
-            generateCurrentCryptoNews() {
-                const now = new Date();
-                const articles = [];
-                
-                // Generate realistic current articles with proper time distribution
-                const recentNews = [
-                    {
-                        title: 'Bitcoin Maintains Strong Support Above $96,500 as Institutional Demand Grows',
-                        source: 'CoinDesk',
-                        category: 'coins',
-                        importance: 'high',
-                        excerpt: 'Bitcoin continues to hold key support levels as major institutions increase their digital asset allocations following recent regulatory clarity...',
-                        timeOffset: 15 // 15 minutes ago
-                    },
-                    {
-                        title: 'Ethereum Layer 2 Solutions Process Record 15M Daily Transactions',
-                        source: 'CoinTelegraph',
-                        category: 'coins',
-                        importance: 'medium',
-                        excerpt: 'Arbitrum, Polygon, and Optimism see unprecedented usage as DeFi activity surges and gas fees on mainnet remain elevated...',
-                        timeOffset: 32
-                    },
-                    {
-                        title: 'SEC Announces Final Guidelines for Cryptocurrency Exchange Regulation',
-                        source: 'The Block',
-                        category: 'government',
-                        importance: 'high',
-                        excerpt: 'Securities and Exchange Commission provides comprehensive framework for digital asset trading platforms operating in the United States...',
-                        timeOffset: 48
-                    },
-                    {
-                        title: 'BlackRock Bitcoin ETF Reports $2.1B in Weekly Inflows',
-                        source: 'Bitcoin.com',
-                        category: 'institutions',
-                        importance: 'high',
-                        excerpt: 'Asset management giant sees continued strong demand for spot Bitcoin exposure as traditional investors embrace digital assets...',
-                        timeOffset: 75
-                    },
-                    {
-                        title: 'Solana Network Achieves New Speed Milestone with 65,000 TPS',
-                        source: 'Crypto Briefing',
-                        category: 'coins',
-                        importance: 'medium',
-                        excerpt: 'High-performance blockchain demonstrates improved throughput capabilities following recent network optimizations and validator upgrades...',
-                        timeOffset: 95
-                    },
-                    {
-                        title: 'European Central Bank Advances Digital Euro Pilot Program',
-                        source: 'BeInCrypto',
-                        category: 'government',
-                        importance: 'high',
-                        excerpt: 'ECB officials announce expanded testing phase for central bank digital currency with major European financial institutions...',
-                        timeOffset: 120
-                    },
-                    {
-                        title: 'Coinbase Expands International Operations to 15 New Markets',
-                        source: 'Coinpedia',
-                        category: 'institutions',
-                        importance: 'medium',
-                        excerpt: 'Major cryptocurrency exchange receives regulatory approvals to operate in additional jurisdictions across Asia and Latin America...',
-                        timeOffset: 145
-                    },
-                    {
-                        title: 'DeFi Total Value Locked Surpasses $180 Billion Mark',
-                        source: 'CryptoPotato',
-                        category: 'coins',
-                        importance: 'medium',
-                        excerpt: 'Decentralized finance protocols experience significant growth as yield farming and liquidity mining attract institutional capital...',
-                        timeOffset: 180
-                    },
-                    {
-                        title: 'Binance Receives Full Operating License in United Arab Emirates',
-                        source: 'CoinDesk',
-                        category: 'institutions',
-                        importance: 'high',
-                        excerpt: 'World\'s largest cryptocurrency exchange secures comprehensive regulatory approval from UAE financial authorities...',
-                        timeOffset: 200
-                    },
-                    {
-                        title: 'Cardano Smart Contract Activity Increases 340% Following Upgrade',
-                        source: 'CoinTelegraph',
-                        category: 'coins',
-                        importance: 'medium',
-                        excerpt: 'Blockchain platform sees surge in developer activity and transaction volume after implementing performance improvements...',
-                        timeOffset: 235
-                    }
-                ];
-                
-                // Add more articles for earlier timeframes
-                const olderNews = [
-                    {
-                        title: 'Federal Reserve Chair Powell Comments on Digital Dollar Development',
-                        source: 'The Block',
-                        category: 'government',
-                        importance: 'high',
-                        excerpt: 'Fed Chairman discusses central bank digital currency research and potential implementation timeline during congressional testimony...',
-                        timeOffset: 280
-                    },
-                    {
-                        title: 'MicroStrategy Adds Another 3,000 Bitcoin to Corporate Treasury',
-                        source: 'Bitcoin.com',
-                        category: 'institutions',
-                        importance: 'high',
-                        excerpt: 'Business intelligence company continues aggressive Bitcoin accumulation strategy with $290 million purchase...',
-                        timeOffset: 320
-                    },
-                    {
-                        title: 'Polygon Announces Partnership with Disney for NFT Marketplace',
-                        source: 'Crypto Briefing',
-                        category: 'coins',
-                        importance: 'medium',
-                        excerpt: 'Entertainment giant selects Ethereum scaling solution for upcoming digital collectibles and metaverse experiences...',
-                        timeOffset: 365
-                    },
-                    {
-                        title: 'Chainlink Integrates with Major Banking Network SWIFT',
-                        source: 'BeInCrypto',
-                        category: 'institutions',
-                        importance: 'high',
-                        excerpt: 'Oracle network provider enables blockchain connectivity for traditional cross-border payment systems...',
-                        timeOffset: 410
-                    },
-                    {
-                        title: 'Avalanche Subnet for Gaming Sees 500% Developer Growth',
-                        source: 'Coinpedia',
-                        category: 'coins',
-                        importance: 'medium',
-                        excerpt: 'Blockchain gaming infrastructure experiences massive adoption as Web3 gaming market expands rapidly...',
-                        timeOffset: 450
-                    }
-                ];
-                
-                // Combine and process all articles
-                const allArticleTemplates = [...recentNews, ...olderNews];
-                
-                allArticleTemplates.forEach((template, index) => {
-                    const publishDate = new Date(now.getTime() - (template.timeOffset * 60 * 1000));
-                    const timeAgo = this.getTimeAgo(publishDate);
-                    
-                    articles.push({
-                        id: 1000 + index,
-                        title: template.title,
-                        source: template.source,
-                        category: template.category,
-                        timeAgo: timeAgo,
-                        excerpt: template.excerpt,
-                        link: this.generateRealisticLink(template.source, template.title),
-                        importance: template.importance,
-                        publishDate: publishDate,
-                        isNew: template.timeOffset < 60 // New if less than 1 hour old
-                    });
-                });
-                
-                // Add some additional variety
-                for (let i = 16; i <= 80; i++) {
-                    const sources = ['CoinDesk', 'CoinTelegraph', 'The Block', 'Bitcoin.com', 'Crypto Briefing', 'BeInCrypto', 'Coinpedia', 'CryptoPotato'];
-                    const categories = ['coins', 'institutions', 'government'];
-                    const importances = ['high', 'medium', 'low'];
-                    
-                    const timeOffset = 500 + (i * 30); // Spread over time
-                    const publishDate = new Date(now.getTime() - (timeOffset * 60 * 1000));
-                    
-                    articles.push({
-                        id: 1000 + i,
-                        title: this.generateRealisticTitle(i),
-                        source: sources[i % sources.length],
-                        category: categories[i % categories.length],
-                        timeAgo: this.getTimeAgo(publishDate),
-                        excerpt: this.generateRealisticExcerpt(),
-                        link: `https://coindesk.com/news/crypto-article-${i}`,
-                        importance: importances[i % importances.length],
-                        publishDate: publishDate,
-                        isNew: false
-                    });
-                }
-                
-                return articles;
-            }
-            
-            generateRealisticTitle(index) {
-                const titles = [
-                    'Crypto Market Cap Reaches New All-Time High of $3.2 Trillion',
-                    'Major Bank Announces Bitcoin Custody Services for Institutional Clients',
-                    'Ethereum Gas Fees Drop to Lowest Levels Since 2020',
-                    'New Cryptocurrency Regulation Bill Passes House Committee',
-                    'DeFi Protocol Launches Cross-Chain Bridge for Multiple Blockchains',
-                    'Central Bank Digital Currency Pilot Program Expands to 50 Countries',
-                    'NFT Marketplace Integrates with Major Social Media Platform',
-                    'Cryptocurrency Exchange Reports Record Trading Volume',
-                    'Blockchain Infrastructure Company Raises $500M in Series C',
-                    'Stablecoin Issuer Receives Banking License from Financial Regulator'
-                ];
-                return titles[index % titles.length] + ` - Update ${Math.floor(index / 10) + 1}`;
-            }
-            
-            generateRealisticExcerpt() {
-                const excerpts = [
-                    'Market analysts report continued institutional adoption driving cryptocurrency prices to new highs across major digital assets...',
-                    'Financial institutions increasingly embrace digital asset custody solutions as regulatory clarity improves market confidence...',
-                    'Network upgrades and Layer 2 scaling solutions contribute to reduced transaction costs and improved user experience...',
-                    'Lawmakers advance comprehensive cryptocurrency legislation aimed at providing regulatory framework for digital assets...',
-                    'Innovation in decentralized finance continues with new protocols offering enhanced interoperability and security features...'
-                ];
-                return excerpts[Math.floor(Math.random() * excerpts.length)];
-            }
-            
-            generateRealisticLink(source, title) {
-                const slug = title.toLowerCase()
-                    .replace(/[^a-z0-9\s]/g, '')
-                    .replace(/\s+/g, '-')
-                    .substring(0, 50);
-                
-                const domains = {
-                    'CoinDesk': 'coindesk.com',
-                    'CoinTelegraph': 'cointelegraph.com',
-                    'The Block': 'theblock.co',
-                    'Bitcoin.com': 'news.bitcoin.com',
-                    'Crypto Briefing': 'cryptobriefing.com',
-                    'BeInCrypto': 'beincrypto.com',
-                    'Coinpedia': 'coinpedia.org',
-                    'CryptoPotato': 'cryptopotato.com'
-                };
-                
-                return `https://${domains[source] || 'coindesk.com'}/news/${slug}`;
             }
             
             getTimeAgo(date) {
@@ -788,6 +639,37 @@
                 
                 const diffInDays = Math.floor(diffInHours / 24);
                 return `${diffInDays}d ago`;
+            }
+            
+            removeDuplicates(articles) {
+                const seen = new Set();
+                return articles.filter(article => {
+                    const key = article.title.toLowerCase().substring(0, 50);
+                    if (seen.has(key)) {
+                        return false;
+                    }
+                    seen.add(key);
+                    return true;
+                });
+            }
+            
+            generateFallbackNews() {
+                // Only used if RSS completely fails
+                const currentTime = new Date();
+                return [
+                    {
+                        id: 9999,
+                        title: 'Crypto News Loading - Please Refresh',
+                        source: 'System',
+                        category: 'coins',
+                        timeAgo: 'Just now',
+                        excerpt: 'News feeds are temporarily unavailable. Please refresh the page to try again.',
+                        link: '#',
+                        importance: 'medium',
+                        publishDate: currentTime,
+                        isNew: false
+                    }
+                ];
             }
             
             getFilteredNews() {
@@ -807,16 +689,35 @@
             }
             
             startAutoUpdate() {
-                // Update every 10 minutes
+                // Update every 5 minutes
                 this.updateInterval = setInterval(() => {
                     this.updateNews();
-                }, 10 * 60 * 1000);
+                }, 5 * 60 * 1000);
             }
             
             async updateNews() {
+                if (this.isLoading) return;
+                
                 console.log('Updating news...');
-                await this.loadNews();
+                const oldCount = this.allNews.length;
+                await this.loadInitialNews();
+                const newCount = this.allNews.length;
+                
+                if (newCount > oldCount) {
+                    console.log(`Added ${newCount - oldCount} new articles`);
+                    // Mark new articles
+                    this.allNews.slice(0, newCount - oldCount).forEach(article => {
+                        article.isNew = true;
+                    });
+                }
+                
                 this.render();
+                
+                // Remove new highlighting after 30 seconds
+                setTimeout(() => {
+                    this.allNews.forEach(article => article.isNew = false);
+                    this.render();
+                }, 30000);
             }
             
             handleInstall() {
@@ -847,7 +748,7 @@
                                         LIVE
                                     </div>
                                 </div>
-                                <div class="subtitle">Latest cryptocurrency news • Auto-updating every 10min</div>
+                                <div class="subtitle">Latest cryptocurrency news • Auto-updating every 5min</div>
                                 <div style="font-size: 10px; color: #6b7280; font-family: monospace;">Last updated: ${this.lastUpdate.toLocaleTimeString()}</div>
                             </div>
                             <div style="display: flex; align-items: center;">
@@ -857,6 +758,13 @@
                     </div>
                     
                     <div style="padding: 0 20px;">
+                        ${this.errors.length > 0 ? `
+                            <div class="error-message">
+                                <div>⚠️ Some news sources temporarily unavailable (${this.errors.length}/${this.newsFeeds.length} failed)</div>
+                                <button class="retry-btn" onclick="app.updateNews()">Refresh Sources</button>
+                            </div>
+                        ` : ''}
+                        
                         <div style="margin-bottom: 20px;">
                             <div style="color: #9ca3af; font-size: 14px; margin-bottom: 8px;">
                                 Categories (${filteredNews.length} articles)
@@ -870,6 +778,13 @@
                                 `).join('')}
                             </div>
                         </div>
+                        
+                        ${this.isLoading ? `
+                            <div style="text-align: center; padding: 20px;">
+                                <div class="spinner" style="margin: 0 auto 10px;"></div>
+                                <div style="color: #10b981;">Loading fresh news...</div>
+                            </div>
+                        ` : ''}
                         
                         <div>
                             ${displayedNews.map(article => `
@@ -899,6 +814,7 @@
                             <div style="text-align: center; margin: 20px 0; color: #6b7280;">
                                 <div>📰 All articles loaded</div>
                                 <div style="font-size: 12px;">Showing ${filteredNews.length} articles</div>
+                                <div style="font-size: 12px; margin-top: 4px;">Next update in ${Math.ceil((5 * 60 * 1000 - (Date.now() - this.lastUpdate.getTime())) / 60000)} minutes</div>
                             </div>
                         `}
                         
@@ -928,11 +844,25 @@
                         }
                     }
                 });
+                
+                // Manual refresh on pull-down (mobile)
+                window.addEventListener('touchstart', (e) => {
+                    if (window.scrollY === 0) {
+                        this.startY = e.touches[0].clientY;
+                    }
+                });
+                
+                window.addEventListener('touchmove', (e) => {
+                    if (this.startY && e.touches[0].clientY > this.startY + 100 && window.scrollY === 0) {
+                        this.updateNews();
+                        this.startY = null;
+                    }
+                });
             }
         }
         
         // Initialize app
-        const app = new SimpleCryptoNewsApp();
+        const app = new LiveCryptoNewsApp();
         
         // Expose to global scope for button clicks
         window.app = app;
