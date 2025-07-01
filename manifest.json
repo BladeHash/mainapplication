@@ -1,0 +1,50 @@
+{
+  "name": "Crypto News - Live Updates",
+  "short_name": "CryptoNews",
+  "description": "Latest cryptocurrency news and market updates",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23000000'/%3E%3Ctext x='96' y='120' font-family='Arial,sans-serif' font-size='80' fill='%2300ff88' text-anchor='middle'%3E₿%3C/text%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%23000000'/%3E%3Ctext x='256' y='320' font-family='Arial,sans-serif' font-size='200' fill='%2300ff88' text-anchor='middle'%3E₿%3C/text%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ],
+  "categories": ["finance", "news", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Priority News",
+      "short_name": "Priority",
+      "description": "View high priority crypto news",
+      "url": "/?category=priority",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' fill='%23ef4444'/%3E%3Ctext x='48' y='60' font-family='Arial,sans-serif' font-size='40' fill='white' text-anchor='middle'%3E!%3C/text%3E%3C/svg%3E",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Government News",
+      "short_name": "Government", 
+      "description": "View crypto government & regulation news",
+      "url": "/?category=government",
+      "icons": [
+        {
+          "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' fill='%236b7280'/%3E%3Ctext x='48' y='60' font-family='Arial,sans-serif' font-size='40' fill='white' text-anchor='middle'%3E🏛%3C/text%3E%3C/svg%3E",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ]
+}
