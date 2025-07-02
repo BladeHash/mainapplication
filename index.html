@@ -324,11 +324,9 @@
                 this.categories = [
                     { id: 'all', label: 'All News', icon: '📰' },
                     { id: 'priority', label: 'Priority', icon: '⚠️' },
-                    { id: 'bitcoin', label: 'Bitcoin', icon: '₿' },
-                    { id: 'ethereum', label: 'Ethereum', icon: 'Ξ' },
-                    { id: 'defi', label: 'DeFi', icon: '🏦' },
-                    { id: 'regulation', label: 'Regulation', icon: '⚖️' },
-                    { id: 'coins', label: 'Altcoins', icon: '🪙' }
+                    { id: 'government', label: 'Government', icon: '🏛️' },
+                    { id: 'institutions', label: 'Institutions', icon: '📈' },
+                    { id: 'coins', label: 'Top 100 Coins', icon: '🪙' }
                 ];
                 
                 this.init();
@@ -382,14 +380,16 @@
                         }
                     });
                     
-                    if (allArticles.length > 5) {
+                    if (allArticles.length > 3) { // Lower threshold for mobile
                         this.allNews = this.removeDuplicates(allArticles)
                             .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
-                            .slice(0, 100);
+                            .slice(0, 80); // Fewer articles for better mobile performance
                         
                         console.log(`✅ Successfully loaded ${this.allNews.length} articles from ${successCount} sources`);
                         this.lastUpdate = new Date();
+                        this.hasError = false; // Ensure error flag is cleared
                     } else {
+                        console.log(`Only got ${allArticles.length} articles, using fallback`);
                         throw new Error('Insufficient articles from all sources');
                     }
                     
@@ -683,10 +683,23 @@
             categorizeFromTitle(title) {
                 const titleLower = title.toLowerCase();
                 
-                if (titleLower.includes('bitcoin') || titleLower.includes('btc')) return 'bitcoin';
-                if (titleLower.includes('ethereum') || titleLower.includes('eth')) return 'ethereum';
-                if (titleLower.includes('defi') || titleLower.includes('decentralized finance')) return 'defi';
-                if (titleLower.includes('regulation') || titleLower.includes('sec') || titleLower.includes('government')) return 'regulation';
+                if (titleLower.includes('sec') || titleLower.includes('regulation') || 
+                    titleLower.includes('government') || titleLower.includes('legal') ||
+                    titleLower.includes('court') || titleLower.includes('lawsuit') ||
+                    titleLower.includes('congress') || titleLower.includes('bill') ||
+                    titleLower.includes('federal') || titleLower.includes('treasury')) {
+                    return 'government';
+                }
+                
+                if (titleLower.includes('jpmorgan') || titleLower.includes('goldman') || 
+                    titleLower.includes('bank') || titleLower.includes('institutional') ||
+                    titleLower.includes('wall street') || titleLower.includes('fidelity') ||
+                    titleLower.includes('blackrock') || titleLower.includes('grayscale') ||
+                    titleLower.includes('etf') || titleLower.includes('fund') ||
+                    titleLower.includes('coinbase') || titleLower.includes('kraken') ||
+                    titleLower.includes('binance')) {
+                    return 'institutions';
+                }
                 
                 return 'coins';
             }
@@ -719,49 +732,75 @@
             
             async loadFromRSSFeed(rssUrl, sourceName) {
                 try {
+                    // Mobile-friendly CORS proxies with longer timeouts
                     const corsProxies = [
                         'https://api.allorigins.win/get?url=',
-                        'https://corsproxy.io/?'
+                        'https://corsproxy.io/?',
+                        'https://cors-anywhere.herokuapp.com/'
                     ];
                     
                     for (const proxy of corsProxies) {
                         try {
                             const proxyUrl = proxy + encodeURIComponent(rssUrl);
                             
+                            const controller = new AbortController();
+                            const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout for mobile
+                            
                             const response = await fetch(proxyUrl, {
                                 headers: { 
                                     'Accept': 'application/json, text/plain, */*',
-                                    'User-Agent': 'CryptoNewsApp/1.0'
+                                    'User-Agent': 'Mozilla/5.0 (compatible; CryptoNewsApp/1.0)',
+                                    'Cache-Control': 'no-cache'
                                 },
-                                signal: AbortSignal.timeout(12000)
+                                signal: controller.signal,
+                                mode: 'cors'
                             });
                             
-                            if (!response.ok) continue;
+                            clearTimeout(timeoutId);
+                            
+                            if (!response.ok) {
+                                console.log(`${sourceName}: HTTP ${response.status} from ${proxy}`);
+                                continue;
+                            }
                             
                             let xmlText;
-                            const contentType = response.headers.get('content-type');
+                            const contentType = response.headers.get('content-type') || '';
                             
-                            if (contentType && contentType.includes('application/json')) {
+                            if (contentType.includes('application/json')) {
                                 const data = await response.json();
-                                xmlText = data.contents || data;
+                                xmlText = data.contents || data.data || data;
+                                if (typeof xmlText !== 'string') {
+                                    xmlText = JSON.stringify(xmlText);
+                                }
                             } else {
                                 xmlText = await response.text();
                             }
                             
-                            if (!xmlText || xmlText.length < 100) continue;
+                            if (!xmlText || xmlText.length < 100) {
+                                console.log(`${sourceName}: Response too short from ${proxy}`);
+                                continue;
+                            }
                             
                             // Parse RSS XML
                             const parser = new DOMParser();
                             const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
                             
                             const parseError = xmlDoc.querySelector('parsererror');
-                            if (parseError) continue;
+                            if (parseError) {
+                                console.log(`${sourceName}: XML parse error from ${proxy}`);
+                                continue;
+                            }
                             
                             const items = xmlDoc.querySelectorAll('item, entry');
                             const articles = [];
                             
+                            if (items.length === 0) {
+                                console.log(`${sourceName}: No items found from ${proxy}`);
+                                continue;
+                            }
+                            
                             items.forEach((item, index) => {
-                                if (index < 15) { // Limit to 15 articles per source
+                                if (index < 12) { // Fewer articles for mobile performance
                                     try {
                                         const title = this.getTextContent(item, 'title');
                                         const link = this.getTextContent(item, 'link, guid') || this.getAttributeContent(item, 'link', 'href');
@@ -780,10 +819,10 @@
                                             }
                                             
                                             let excerpt = this.cleanText(description);
-                                            if (excerpt.length > 200) {
-                                                excerpt = excerpt.substring(0, 200) + '...';
-                                            } else if (excerpt.length < 50) {
-                                                excerpt = `Latest ${sourceName} article about ${this.categorizeFromTitle(title)}`;
+                                            if (excerpt.length > 180) {
+                                                excerpt = excerpt.substring(0, 180) + '...';
+                                            } else if (excerpt.length < 30) {
+                                                excerpt = `Read the latest ${sourceName} article about cryptocurrency and blockchain technology.`;
                                             }
                                             
                                             articles.push({
@@ -808,20 +847,27 @@
                             });
                             
                             if (articles.length > 0) {
-                                console.log(`✅ ${sourceName} RSS: Loaded ${articles.length} articles`);
+                                console.log(`✅ ${sourceName} RSS: Loaded ${articles.length} articles via ${proxy}`);
                                 return articles;
+                            } else {
+                                console.log(`${sourceName}: No valid articles parsed from ${proxy}`);
                             }
                             
                         } catch (error) {
-                            console.log(`❌ ${sourceName} RSS Proxy ${proxy} failed:`, error.message);
+                            if (error.name === 'AbortError') {
+                                console.log(`${sourceName}: Timeout with ${proxy}`);
+                            } else {
+                                console.log(`${sourceName}: Error with ${proxy} - ${error.message}`);
+                            }
                             continue;
                         }
                     }
                     
+                    console.log(`❌ ${sourceName}: All proxies failed`);
                     return [];
                     
                 } catch (error) {
-                    console.error(`${sourceName} RSS error:`, error);
+                    console.error(`${sourceName} RSS critical error:`, error);
                     return [];
                 }
             }
