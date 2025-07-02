@@ -354,47 +354,25 @@
                 
                 this.isLoading = true;
                 this.hasError = false;
-                console.log('Loading news from multiple sources...');
+                console.log('Loading news from CryptoPanic API...');
                 
                 try {
-                    const allArticles = [];
+                    const articles = await this.loadFromCryptoPanic();
                     
-                    // Load from multiple sources for better diversity
-                    const sources = [
-                        this.loadFromCryptoPanic(),
-                        this.loadFromCoinDeskRSS(),
-                        this.loadFromCoinTelegraphRSS(),
-                        this.loadFromTheBlockRSS()
-                    ];
-                    
-                    const results = await Promise.allSettled(sources);
-                    let successCount = 0;
-                    
-                    results.forEach((result, index) => {
-                        if (result.status === 'fulfilled' && result.value.length > 0) {
-                            allArticles.push(...result.value);
-                            successCount++;
-                            console.log(`✅ Source ${index + 1}: ${result.value.length} articles`);
-                        } else {
-                            console.log(`❌ Source ${index + 1}: ${result.reason || 'No articles'}`);
-                        }
-                    });
-                    
-                    if (allArticles.length > 3) { // Lower threshold for mobile
-                        this.allNews = this.removeDuplicates(allArticles)
+                    if (articles.length > 3) {
+                        this.allNews = articles
                             .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
-                            .slice(0, 80); // Fewer articles for better mobile performance
+                            .slice(0, 80);
                         
-                        console.log(`✅ Successfully loaded ${this.allNews.length} articles from ${successCount} sources`);
+                        console.log(`✅ Successfully loaded ${this.allNews.length} articles from CryptoPanic`);
                         this.lastUpdate = new Date();
-                        this.hasError = false; // Ensure error flag is cleared
+                        this.hasError = false;
                     } else {
-                        console.log(`Only got ${allArticles.length} articles, using fallback`);
-                        throw new Error('Insufficient articles from all sources');
+                        throw new Error('Insufficient articles from CryptoPanic');
                     }
                     
                 } catch (error) {
-                    console.error('All sources failed:', error);
+                    console.error('CryptoPanic API failed:', error);
                     this.hasError = true;
                     this.allNews = this.generateFallbackNews();
                     this.lastUpdate = new Date();
@@ -718,222 +696,6 @@
                 return 'low';
             }
             
-            async loadFromCoinDeskRSS() {
-                return this.loadFromRSSFeed('https://www.coindesk.com/arc/outboundfeeds/rss/', 'CoinDesk');
-            }
-            
-            async loadFromCoinTelegraphRSS() {
-                return this.loadFromRSSFeed('https://cointelegraph.com/rss', 'CoinTelegraph');
-            }
-            
-            async loadFromTheBlockRSS() {
-                return this.loadFromRSSFeed('https://www.theblock.co/rss.xml', 'The Block');
-            }
-            
-            async loadFromRSSFeed(rssUrl, sourceName) {
-                try {
-                    // Mobile-friendly CORS proxies with longer timeouts
-                    const corsProxies = [
-                        'https://api.allorigins.win/get?url=',
-                        'https://corsproxy.io/?',
-                        'https://cors-anywhere.herokuapp.com/'
-                    ];
-                    
-                    for (const proxy of corsProxies) {
-                        try {
-                            const proxyUrl = proxy + encodeURIComponent(rssUrl);
-                            
-                            const controller = new AbortController();
-                            const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout for mobile
-                            
-                            const response = await fetch(proxyUrl, {
-                                headers: { 
-                                    'Accept': 'application/json, text/plain, */*',
-                                    'User-Agent': 'Mozilla/5.0 (compatible; CryptoNewsApp/1.0)',
-                                    'Cache-Control': 'no-cache'
-                                },
-                                signal: controller.signal,
-                                mode: 'cors'
-                            });
-                            
-                            clearTimeout(timeoutId);
-                            
-                            if (!response.ok) {
-                                console.log(`${sourceName}: HTTP ${response.status} from ${proxy}`);
-                                continue;
-                            }
-                            
-                            let xmlText;
-                            const contentType = response.headers.get('content-type') || '';
-                            
-                            if (contentType.includes('application/json')) {
-                                const data = await response.json();
-                                xmlText = data.contents || data.data || data;
-                                if (typeof xmlText !== 'string') {
-                                    xmlText = JSON.stringify(xmlText);
-                                }
-                            } else {
-                                xmlText = await response.text();
-                            }
-                            
-                            if (!xmlText || xmlText.length < 100) {
-                                console.log(`${sourceName}: Response too short from ${proxy}`);
-                                continue;
-                            }
-                            
-                            // Parse RSS XML
-                            const parser = new DOMParser();
-                            const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
-                            
-                            const parseError = xmlDoc.querySelector('parsererror');
-                            if (parseError) {
-                                console.log(`${sourceName}: XML parse error from ${proxy}`);
-                                continue;
-                            }
-                            
-                            const items = xmlDoc.querySelectorAll('item, entry');
-                            const articles = [];
-                            
-                            if (items.length === 0) {
-                                console.log(`${sourceName}: No items found from ${proxy}`);
-                                continue;
-                            }
-                            
-                            items.forEach((item, index) => {
-                                if (index < 12) { // Fewer articles for mobile performance
-                                    try {
-                                        const title = this.getTextContent(item, 'title');
-                                        const link = this.getTextContent(item, 'link, guid') || this.getAttributeContent(item, 'link', 'href');
-                                        const description = this.getTextContent(item, 'description, summary, content, content:encoded');
-                                        const pubDate = this.getTextContent(item, 'pubDate, published, updated, dc:date');
-                                        
-                                        if (title && link && title.length > 10 && link.startsWith('http')) {
-                                            let publishDate;
-                                            try {
-                                                publishDate = pubDate ? new Date(pubDate) : new Date();
-                                                if (isNaN(publishDate.getTime()) || publishDate > new Date()) {
-                                                    publishDate = new Date();
-                                                }
-                                            } catch (e) {
-                                                publishDate = new Date();
-                                            }
-                                            
-                                            let excerpt = this.cleanText(description);
-                                            if (excerpt.length > 180) {
-                                                excerpt = excerpt.substring(0, 180) + '...';
-                                            } else if (excerpt.length < 30) {
-                                                excerpt = `Read the latest ${sourceName} article about cryptocurrency and blockchain technology.`;
-                                            }
-                                            
-                                            articles.push({
-                                                id: this.generateId(title + link),
-                                                title: this.cleanText(title),
-                                                link: link,
-                                                excerpt: excerpt,
-                                                source: sourceName,
-                                                publishDate: publishDate,
-                                                timeAgo: this.getTimeAgo(publishDate),
-                                                category: this.categorizeFromTitle(title),
-                                                importance: this.getImportanceFromTitle(title),
-                                                isNew: (Date.now() - publishDate.getTime()) < 3600000,
-                                                votes: {},
-                                                currencies: this.extractCurrenciesFromTitle(title)
-                                            });
-                                        }
-                                    } catch (parseError) {
-                                        // Skip bad articles
-                                    }
-                                }
-                            });
-                            
-                            if (articles.length > 0) {
-                                console.log(`✅ ${sourceName} RSS: Loaded ${articles.length} articles via ${proxy}`);
-                                return articles;
-                            } else {
-                                console.log(`${sourceName}: No valid articles parsed from ${proxy}`);
-                            }
-                            
-                        } catch (error) {
-                            if (error.name === 'AbortError') {
-                                console.log(`${sourceName}: Timeout with ${proxy}`);
-                            } else {
-                                console.log(`${sourceName}: Error with ${proxy} - ${error.message}`);
-                            }
-                            continue;
-                        }
-                    }
-                    
-                    console.log(`❌ ${sourceName}: All proxies failed`);
-                    return [];
-                    
-                } catch (error) {
-                    console.error(`${sourceName} RSS critical error:`, error);
-                    return [];
-                }
-            }
-            
-            getTextContent(item, selectors) {
-                const selectorList = selectors.split(', ');
-                for (const selector of selectorList) {
-                    const element = item.querySelector(selector);
-                    if (element) {
-                        if (element.textContent) {
-                            return element.textContent.trim();
-                        } else if (element.getAttribute('href')) {
-                            return element.getAttribute('href');
-                        } else if (element.innerHTML) {
-                            return element.innerHTML.trim();
-                        }
-                    }
-                }
-                return '';
-            }
-            
-            getAttributeContent(item, selector, attribute) {
-                const element = item.querySelector(selector);
-                return element ? element.getAttribute(attribute) || '' : '';
-            }
-            
-            cleanText(text) {
-                if (!text) return '';
-                return text
-                    .replace(/<[^>]*>/g, '')
-                    .replace(/&[^;]+;/g, '')
-                    .replace(/\s+/g, ' ')
-                    .replace(/\[.*?\]/g, '')
-                    .trim();
-            }
-            
-            generateId(str) {
-                let hash = 0;
-                for (let i = 0; i < str.length; i++) {
-                    const char = str.charCodeAt(i);
-                    hash = ((hash << 5) - hash) + char;
-                    hash = hash & hash;
-                }
-                return Math.abs(hash);
-            }
-            
-            extractCurrenciesFromTitle(title) {
-                const currencies = [];
-                const titleLower = title.toLowerCase();
-                
-                if (titleLower.includes('bitcoin') || titleLower.includes('btc')) {
-                    currencies.push({ code: 'BTC', title: 'Bitcoin' });
-                }
-                if (titleLower.includes('ethereum') || titleLower.includes('eth')) {
-                    currencies.push({ code: 'ETH', title: 'Ethereum' });
-                }
-                if (titleLower.includes('solana') || titleLower.includes('sol')) {
-                    currencies.push({ code: 'SOL', title: 'Solana' });
-                }
-                if (titleLower.includes('cardano') || titleLower.includes('ada')) {
-                    currencies.push({ code: 'ADA', title: 'Cardano' });
-                }
-                
-                return currencies;
-            }
-            
             removeDuplicates(articles) {
                 const seen = new Set();
                 return articles.filter(article => {
@@ -1106,7 +868,7 @@
                                     </div>
                                     ${this.showInstallButton ? '<button class="install-btn" onclick="app.handleInstall()">📱 Install</button>' : ''}
                                 </div>
-                                <div class="subtitle">Latest from CoinDesk, CoinTelegraph, The Block & more • Auto-updates every 15min</div>
+                                <div class="subtitle">Latest from CryptoPanic API • Auto-updates every 15min</div>
                                 <div style="font-size: 9px; color: #6b7280; font-family: monospace;">Last: ${this.lastUpdate.toLocaleTimeString()}</div>
                             </div>
                         </div>
