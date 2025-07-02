@@ -1,4 +1,8 @@
-<!DOCTYPE html>
+if (allArticles.length === 0) {
+                        throw new Error('No articles loaded from any endpoint');
+                    }
+                    
+                    console.log(`✅ CryptoPanic: Total loaded ${allArticles.length<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -1005,7 +1009,10 @@
                 
                 const app = document.getElementById('app');
                 
-                if (this.hasError) {
+                // Only show error if we actually have no articles OR if hasError is true AND we have fallback content
+                const shouldShowError = this.hasError && this.allNews.length > 0 && this.allNews[0].id >= 7000;
+                
+                if (shouldShowError) {
                     app.innerHTML = `
                         <div class="error-message">
                             <strong>⚠️ Connection Issues</strong>
